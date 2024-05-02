@@ -1,0 +1,144 @@
+---
+title: "School Absenteeism Project"
+author: "Woomy Michel :)"
+date: "2024-02-26"
+output: html_document
+---
+Installing packages.
+```{r}
+library(tidyverse)
+library(dplyr)
+library(readxl)
+library(skimr)
+```
+Reading in the data.
+```{r}
+ela = read_xlsx("school-ela-results-2013-2023-(public).xlsx", sheet = 2)
+
+math = read_xlsx("school-math-results-2013-2023-(public).xlsx", sheet = 2)
+
+attendance = read_xlsx("public-school-attendance-results-2018-2023.xlsx", sheet = 2)
+
+demographic_snapshot = read_xlsx("demographic-snapshot-2018-19-to-2022-23-(public).xlsx", sheet = "School")
+```
+Filtering the years of interest.
+```{r}
+demographic_snapshot_filtered = filter(demographic_snapshot, Year == "2018-19" | Year == "2019-20" | Year == "2020-21" | Year == "2021-22" | Year == "2022-23")
+
+math_filtered = filter(math, Year == "2018" | Year == "2019" | Year == "2020" | Year == "2021" | Year == "2022" | Year == "2023")
+
+ela_filtered = filter(ela, Year == "2018" | Year == "2019" | Year == "2020" | Year == "2021" | Year == "2022" | Year == "2023")
+
+attendance_filtered = filter(attendance, Year == "2018-19" | Year == "2019-20" | Year == "2020-21" | Year == "2021-22" | Year == "2022-23") 
+```
+Converting the years in the attendance data. 
+```{r}
+attendance_filtered[attendance_filtered == "2018-19"] = "2019"
+
+attendance_filtered[attendance_filtered == "2019-20"] = "2020"
+
+attendance_filtered[attendance_filtered == "2020-21"] = "2021"
+
+attendance_filtered[attendance_filtered == "2021-22"] = "2022"
+
+attendance_filtered[attendance_filtered == "2022-23"] = "2023"
+```
+Converting the years in the demographic data.
+```{r}
+demographic_snapshot_filtered[demographic_snapshot_filtered == "2018-19"] = "2019"
+
+demographic_snapshot_filtered[demographic_snapshot_filtered == "2019-20"] = "2020"
+
+demographic_snapshot_filtered[demographic_snapshot_filtered == "2020-21"] = "2021"
+
+demographic_snapshot_filtered[demographic_snapshot_filtered == "2021-22"] = "2022"
+
+demographic_snapshot_filtered[demographic_snapshot_filtered == "2022-23"] = "2023"
+```
+Converting year to a numeric value across all datasets.
+```{r}
+demographic_snapshot_filtered$Year = as.numeric(demographic_snapshot_filtered$Year)
+
+attendance_filtered$Year = as.numeric(attendance_filtered$Year)
+
+ela_filtered$Year = as.numeric(ela_filtered$Year)
+
+math_filtered$Year = as.numeric(math_filtered$Year)
+```
+Selecting "All Grades" across the datasets.
+```{r}
+math_filtered = filter(math_filtered, Grade == "All Grades")
+
+ela_filtered = filter(ela_filtered, Grade == "All Grades")
+
+attendance_filtered = filter(attendance_filtered, Grade == "All Grades")
+
+```
+Renaming the columns in the Math, ELA and attendance datasets.
+```{r}
+for (i in 6:ncol(math_filtered)) {
+  oldname <- colnames(math_filtered[i])
+  newname <- paste(oldname, "m", sep = "_")
+  colnames(math_filtered)[i] <- newname
+}
+
+
+for (i in 6:ncol(ela_filtered)) {
+  oldname <- colnames(ela_filtered[i])
+  newname <- paste(oldname, "e", sep = "_")
+  colnames(ela_filtered)[i] <- newname
+}
+
+for (i in 6:ncol(attendance_filtered)) {
+  oldname <- colnames(attendance_filtered[i])
+  newname <- paste(oldname, "a", sep = "_")
+  colnames(attendance_filtered)[i] <- newname
+}
+```
+Joining the four datasets.
+```{r}
+merged_dataset = ela_filtered %>% inner_join(math_filtered, by = c("DBN", "Year")) %>% inner_join(demographic_snapshot_filtered, by = c("DBN", "Year")) %>% inner_join(attendance_filtered, by = c("DBN", "Year"))
+```
+Adding a new column that shows the % of students that sat for testing
+```{r}
+merged_dataset$`% tested_e` <- merged_dataset$`Number Tested_e`/merged_dataset$`Total Enrollment`
+
+merged_dataset$`% tested_m` <- merged_dataset$`Number Tested_m`/merged_dataset$`Total Enrollment`
+```
+Removing unnecessary columns in the merged dataset.
+```{r}
+merged_dataset <- merged_dataset %>% select(-contains("Number"),-"# Missing Race/Ethnicity Data",-"# Multi-Racial",-"# Black", -"# Asian", -"# Female", -"# Male", -"# White",-"# Hispanic",-"# Native American", -"# English Language Learners",-contains("Level"),-contains("..."), -contains("Category"), -contains("School Name"),-"# Poverty",-contains("Grade"), -"# Students with Disabilities", -"# Neither Female nor Male", -"% Neither Female nor Male")
+```
+Converting "Above 95%" entries to 0.95.
+```{r}
+merged_dataset[merged_dataset == "Above 95%"] <- "0.95"
+```
+Imputing the missing values with the mean of the column.
+```{r}
+merged_dataset %>% select(`Mean Scale Score_e`) %>% filter(`Mean Scale Score_e` != "s") %>% mutate(`Mean Scale Score_e` = as.numeric(`Mean Scale Score_e`)) %>% mutate(mean = sum(`Mean Scale Score_e`)/3308)
+
+merged_dataset %>% select(`Mean Scale Score_m`) %>% filter(`Mean Scale Score_m` != "s") %>% mutate(`Mean Scale Score_m` = as.numeric(`Mean Scale Score_m`)) %>% mutate(mean = sum(`Mean Scale Score_m`)/3308)
+
+merged_dataset$`Mean Scale Score_e`[merged_dataset$`Mean Scale Score_e` == "s"] <- 550.5561
+merged_dataset$`Mean Scale Score_m`[merged_dataset$`Mean Scale Score_m` == "s"] <- 538.5141
+
+#converting to a numeric value
+merged_dataset$`Mean Scale Score_e` = as.numeric(merged_dataset$`Mean Scale Score_e`)
+merged_dataset$`Mean Scale Score_m`= as.numeric(merged_dataset$`Mean Scale Score_m`)
+```
+Standardizing test scores for the neural network.
+```{r}
+library(scales)
+```
+Converting test scores to values between 0 and 1.
+```{r}
+new_df = merged_dataset
+new_df$`Mean Scale Score_e` <- rescale(new_df$`Mean Scale Score_e`)
+new_df$`Mean Scale Score_m` <- rescale(new_df$`Mean Scale Score_m`)
+```
+Saving the cleaned data.
+```{r}
+write.csv(new_df, "School_Absenteeism_Cleaned.csv")
+```
+
+
